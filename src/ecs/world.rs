@@ -3,7 +3,10 @@ use tokio::sync::mpsc;
 use tracing::debug;
 
 use super::commands::{Command, UserView};
-use super::components::{Identity, OwnedBy};
+use super::components::{AudioSink, AudioSource, Identity, JitterState, OutboundTx, OwnedBy, RoomMembership};
+use super::systems::audio_forward;
+use crate::common::jitter::SequenceTracker;
+use crate::common::packet;
 
 /// Handle for sending `Command`s into the single task that owns the `World`.
 /// Cloning this is cheap and safe to hand out to every connection task.
@@ -36,7 +39,10 @@ pub fn spawn_driver() -> DriverHandle {
     DriverHandle { tx }
 }
 
-fn handle_command(world: &mut World, cmd: Command) {
+/// Applies one `Command` to `world`. The driver task is the only caller in
+/// production; tests call this directly to exercise systems without needing
+/// a running driver or real sockets.
+pub fn handle_command(world: &mut World, cmd: Command) {
     match cmd {
         Command::CreateUser { username, reply } => {
             let entity = world.spawn((Identity { username },));
@@ -69,6 +75,36 @@ fn handle_command(world: &mut World, cmd: Command) {
             });
 
             let _ = reply.send(view);
+        }
+        Command::RegisterVoicePeer {
+            room,
+            outbound,
+            reply,
+        } => {
+            let entity = world.spawn((
+                RoomMembership(room),
+                AudioSource,
+                AudioSink,
+                OutboundTx(outbound),
+                JitterState(SequenceTracker::new()),
+            ));
+            debug!(?entity, room = room.0, "registered voice peer");
+            let _ = reply.send(entity);
+        }
+        Command::PacketReceived { from, packet: bytes } => {
+            let Ok((header, _payload)) = packet::decode(bytes.clone()) else {
+                debug!(?from, "dropped malformed packet");
+                return;
+            };
+
+            if let Ok(mut jitter) = world.get::<&mut JitterState>(from) {
+                jitter.0.observe(header.sequence);
+            }
+
+            let room = world.get::<&RoomMembership>(from).ok().map(|m| m.0);
+            if let Some(room) = room {
+                audio_forward::run(world, room, from, &bytes);
+            }
         }
     }
 }

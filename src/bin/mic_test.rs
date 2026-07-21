@@ -20,7 +20,7 @@ fn main() -> Result<()> {
     info!(?config, "input config");
 
     let level = Arc::new(AtomicU32::new(0.0f32.to_bits()));
-    let stream_config: StreamConfig = config.clone().into();
+    let stream_config: StreamConfig = config.into();
 
     let err_fn = |err| warn!(%err, "stream error");
 

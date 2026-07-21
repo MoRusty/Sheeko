@@ -20,7 +20,7 @@ fn main() -> Result<()> {
 
     let config = device.default_output_config()?;
     info!(?config, "output config");
-    let stream_config: StreamConfig = config.clone().into();
+    let stream_config: StreamConfig = config.into();
 
     let stream = match config.sample_format() {
         SampleFormat::F32 => build_tone_stream::<f32>(&device, stream_config)?,

@@ -1,9 +1,10 @@
 pub mod commands;
 pub mod components;
+pub mod systems;
 pub mod world;
 
 pub use commands::{Command, UserView};
-pub use world::{DriverHandle, entity_to_id, id_to_entity, spawn_driver};
+pub use world::{DriverHandle, entity_to_id, handle_command, id_to_entity, spawn_driver};
 
 #[cfg(test)]
 mod tests {

@@ -45,4 +45,10 @@ This is a high-performance, real-time communication server built in Rust, mimick
 - **Manual testing**: Use `socat` or custom CLI clients to send raw UDP packets to validate the server logic; `curl` against the gateway to exercise User/Device entity creation.
 
 ## Current Status
-Check the PDR (Project Definition Report) for milestone tracking. M1 (Foundations + ECS core) is complete: `tcp_echo`, `udp_ping_pong`, and the `gateway` seed (ECS driver task + User/Device entity endpoints) are implemented and verified. Currently moving into M2 (Audio Pipeline).
+Check the PDR (Project Definition Report) for milestone tracking. M1 (Foundations + ECS core), M2 (Audio Pipeline), and M3 (Jitter & Forwarding) are complete:
+- `tcp_echo`, `udp_ping_pong`, the `gateway` seed (ECS driver task + User/Device entity endpoints), `mic_test`, and `voice_client` (440Hz tone + local `AudioSource` tagging) are all implemented and verified.
+- Opus round-trips are unit-tested (`src/common/opus_codec.rs`); the `audio` feature is confirmed to stay out of non-audio binaries.
+- `common::jitter::SequenceTracker` detects drops/reorders across `u16` wraparound; `common::packet` frames raw RTP-like packets over `Bytes`.
+- `voice_node` is a real UDP SFU: `ecs::systems::audio_forward` queries Device entities by `RoomMembership` + `AudioSink` and forwards raw, undecoded packets via each one's `OutboundTx`; verified with a real two-peer UDP exchange (registration, room-scoped forwarding, no self-echo) plus an in-process `tests/ecs_forward.rs` integration test.
+
+`cargo clippy --all-targets` (with and without `--features audio`) is clean. Currently moving into M4 (Text Gateway).
