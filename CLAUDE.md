@@ -45,10 +45,11 @@ This is a high-performance, real-time communication server built in Rust, mimick
 - **Manual testing**: Use `socat` or custom CLI clients to send raw UDP packets to validate the server logic; `curl` against the gateway to exercise User/Device entity creation.
 
 ## Current Status
-Check the PDR (Project Definition Report) for milestone tracking. M1 (Foundations + ECS core), M2 (Audio Pipeline), and M3 (Jitter & Forwarding) are complete:
+Check the PDR (Project Definition Report) for milestone tracking. M1-M4 are complete:
 - `tcp_echo`, `udp_ping_pong`, the `gateway` seed (ECS driver task + User/Device entity endpoints), `mic_test`, and `voice_client` (440Hz tone + local `AudioSource` tagging) are all implemented and verified.
 - Opus round-trips are unit-tested (`src/common/opus_codec.rs`); the `audio` feature is confirmed to stay out of non-audio binaries.
 - `common::jitter::SequenceTracker` detects drops/reorders across `u16` wraparound; `common::packet` frames raw RTP-like packets over `Bytes`.
 - `voice_node` is a real UDP SFU: `ecs::systems::audio_forward` queries Device entities by `RoomMembership` + `AudioSink` and forwards raw, undecoded packets via each one's `OutboundTx`; verified with a real two-peer UDP exchange (registration, room-scoped forwarding, no self-echo) plus an in-process `tests/ecs_forward.rs` integration test.
+- The gateway's Axum app now lives in the library (`src/gateway.rs`), with `src/bin/gateway.rs` reduced to a thin `main()` — this is what let `tests/ws_chat.rs` spin up the real router in-process. `/ws` handles `Join`/`Chat` via `ecs::systems::text_broadcast`, fanning chat out to every `TextChannel` Device in a room; `ServerMessage::Chat.from` identifies the sending *User*, not the Device, so multi-device fan-out shows a consistent sender. `term_client` is a real CLI (`tokio::select!` between stdin and the WS stream, no `futures-util` split needed on the gateway side). Verified both automatically (`tests/ws_chat.rs`, including a same-user/two-device fan-out case) and manually with two real `term_client` processes exchanging "Hello".
 
-`cargo clippy --all-targets` (with and without `--features audio`) is clean. Currently moving into M4 (Text Gateway).
+`cargo clippy --all-targets` (with and without `--features audio`) is clean. Currently moving into M5 (Full Integration).

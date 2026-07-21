@@ -33,6 +33,19 @@ pub enum Command {
     /// other Device in the same room with an `AudioSink`. Fire-and-forget —
     /// no reply, to keep the UDP hot loop free of per-packet round trips.
     PacketReceived { from: Entity, packet: Bytes },
+    /// Registers a WS text session as a new Device entity owned by `user`, in
+    /// `room`, tagged `TextChannel`. Fails (sends `None`) if `user` doesn't
+    /// refer to a live User entity.
+    JoinTextRoom {
+        user: Entity,
+        room: RoomId,
+        outbound: mpsc::UnboundedSender<Bytes>,
+        reply: oneshot::Sender<Option<Entity>>,
+    },
+    /// A chat message from `from`, fanned out to every other `TextChannel`
+    /// Device in `from`'s room. Fire-and-forget, same reasoning as
+    /// `PacketReceived`.
+    ChatMessage { from: Entity, text: String },
 }
 
 /// Snapshot of a User entity and the Device entities currently attached to it.

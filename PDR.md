@@ -41,7 +41,7 @@ RustCord is an educational and functional prototype of a real-time communication
 | **M1: Foundations + ECS core** | 2/5 | Async TCP echo, UDP ping-pong, and an Axum gateway seed backed by the ECS driver task (User/Device entity creation + lookup) instead of a flat key-value store. | Tasks 1, 2, 7 | Done |
 | **M2: Audio Pipeline** | 1/5 | Capture mic, play beep, encode/decode Opus frames; a Device entity tags itself `AudioSource` as soon as it's producing audio. | Tasks 4, 5, 6 | Done |
 | **M3: Jitter & Forwarding** | 2/5 | UDP sequence tracker, ECS-based SFU forwarding system (query producers/consumers by room + capability component). | Tasks 8, 10 | Done |
-| **M4: Text Gateway** | 2/5 | WebSocket broadcast server fanning out to every `TextChannel`-tagged Device in a room (including multiple devices of the same user). | Tasks 3, 9 | Not started |
+| **M4: Text Gateway** | 2/5 | WebSocket broadcast server fanning out to every `TextChannel`-tagged Device in a room (including multiple devices of the same user). | Tasks 3, 9 | Done |
 | **M5: Full Integration** | 3/5 | Combine Gateway + Voice Node; DTLS/SRTP; implement the runtime device-switch endpoint (move `AudioSource` between two Devices of one User mid-call). | All tasks combined. | Not started |
 
 ## 6. Technical Specifications
@@ -64,7 +64,7 @@ RustCord is an educational and functional prototype of a real-time communication
 
 ## 8. Definition of Done (Success Criteria)
 - [x] Gateway can create a User entity and attach multiple Device entities to it, queryable via REST (M1, done).
-- [ ] Two separate terminal clients can exchange "Hello" via WebSocket.
+- [x] Two separate terminal clients can exchange "Hello" via WebSocket (M4, done; verified with real `term_client` processes and automated in `tests/ws_chat.rs`, which also proves one User's two Devices both receive a fan-out from a third party).
 - [x] A user can run `cargo run --bin voice_client --features audio` and hear a 440Hz tone (M2, done; also tags a local Device entity `AudioSource`).
 - [x] A user can run `cargo run --bin mic_test --features audio` and see amplitude levels in the terminal (M2, done).
 - [ ] **Gold Standard**: Client A speaks into the mic; Client B (on the same LAN) receives and plays the audio with less than 200ms round-trip delay, verified via terminal logs.

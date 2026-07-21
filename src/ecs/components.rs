@@ -42,3 +42,8 @@ pub struct OutboundTx(pub mpsc::UnboundedSender<Bytes>);
 /// Per-producer sequence-number tracking (see `common::jitter`), scoped to
 /// whichever Device entity is currently sending audio.
 pub struct JitterState(pub SequenceTracker);
+
+/// Marker: this Device entity is a WS text session and should receive chat
+/// fan-out for its room. Two Devices of the same User can both carry this —
+/// the fan-out doesn't special-case "same user, multiple devices" at all.
+pub struct TextChannel;

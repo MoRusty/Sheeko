@@ -3,9 +3,12 @@ use tokio::sync::mpsc;
 use tracing::debug;
 
 use super::commands::{Command, UserView};
-use super::components::{AudioSink, AudioSource, Identity, JitterState, OutboundTx, OwnedBy, RoomMembership};
-use super::systems::audio_forward;
+use super::components::{
+    AudioSink, AudioSource, Identity, JitterState, OutboundTx, OwnedBy, RoomMembership, TextChannel,
+};
+use super::systems::{audio_forward, text_broadcast};
 use crate::common::jitter::SequenceTracker;
+use crate::common::message::ServerMessage;
 use crate::common::packet;
 
 /// Handle for sending `Command`s into the single task that owns the `World`.
@@ -105,6 +108,47 @@ pub fn handle_command(world: &mut World, cmd: Command) {
             if let Some(room) = room {
                 audio_forward::run(world, room, from, &bytes);
             }
+        }
+        Command::JoinTextRoom {
+            user,
+            room,
+            outbound,
+            reply,
+        } => {
+            if world.contains(user) {
+                let entity = world.spawn((
+                    OwnedBy(user),
+                    RoomMembership(room),
+                    TextChannel,
+                    OutboundTx(outbound),
+                ));
+                debug!(?entity, ?user, room = room.0, "joined text room");
+                let _ = reply.send(Some(entity));
+            } else {
+                let _ = reply.send(None);
+            }
+        }
+        Command::ChatMessage { from, text } => {
+            let room = world.get::<&RoomMembership>(from).ok().map(|m| m.0);
+            let Some(room) = room else { return };
+
+            // Identify the message by the owning User, not the sending
+            // Device — that's what "who said this" means to a human reading
+            // the chat, and it's what makes the same-user/two-device case
+            // show a consistent sender regardless of which device sent it.
+            let sender = world
+                .get::<&OwnedBy>(from)
+                .map(|owned| owned.0)
+                .unwrap_or(from);
+
+            let payload = ServerMessage::Chat {
+                from: entity_to_id(sender),
+                text,
+            };
+            let Ok(bytes) = serde_json::to_vec(&payload) else {
+                return;
+            };
+            text_broadcast::run(world, room, from, &bytes.into());
         }
     }
 }
