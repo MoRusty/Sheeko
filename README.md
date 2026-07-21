@@ -1,4 +1,4 @@
-# RustCord — an ECS Discord clone
+# Sheeko — an ECS Discord clone
 
 A real-time text + voice server, built **data-oriented (ECS)** instead of object-oriented. A `User` is a logical identity, decoupled from any single connection — a phone and a laptop can both be attached to the same account at once, each contributing a different capability (say, one streaming audio, one just watching text), and which device is "live" can move between them at runtime with no reconnect. An OOP model where a `User` struct owns its socket can't express that without special-casing; here it's just moving a component between two entities.
 
