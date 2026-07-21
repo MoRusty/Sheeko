@@ -5,9 +5,26 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0.104"
+audiopus = { version = "0.2.0", optional = true }
 axum = "0.8.9"
+cpal = { version = "0.18.1", optional = true }
 hecs = "0.11.0"
 serde = { version = "1.0.229", features = ["derive"] }
 tokio = { version = "1.53.1", features = ["full"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+
+[features]
+# Keeps cpal/audiopus (and their native build requirements: ALSA, libopus)
+# out of binaries that never touch audio, e.g. `gateway` and `voice_node`.
+audio = ["dep:cpal", "dep:audiopus"]
+
+[[bin]]
+name = "mic_test"
+path = "src/bin/mic_test.rs"
+required-features = ["audio"]
+
+[[bin]]
+name = "voice_client"
+path = "src/bin/voice_client.rs"
+required-features = ["audio"]
