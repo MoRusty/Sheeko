@@ -10,7 +10,7 @@ use axum::{
     },
     http::StatusCode,
     response::IntoResponse,
-    routing::{get, post},
+    routing::{get, post, put},
 };
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
@@ -30,6 +30,12 @@ struct CreateUserResponse {
     user_id: String,
 }
 
+#[derive(Deserialize, Default)]
+struct CreateDeviceRequest {
+    #[serde(default)]
+    as_audio_source: bool,
+}
+
 #[derive(Serialize)]
 struct CreateDeviceResponse {
     device_id: String,
@@ -40,6 +46,7 @@ struct UserResponse {
     user_id: String,
     username: String,
     devices: Vec<String>,
+    online: bool,
 }
 
 pub fn app(driver: DriverHandle) -> Router {
@@ -47,6 +54,10 @@ pub fn app(driver: DriverHandle) -> Router {
         .route("/users", post(create_user))
         .route("/users/{user_id}/devices", post(create_device))
         .route("/users/{user_id}", get(get_user))
+        .route(
+            "/users/{user_id}/audio-device/{device_id}",
+            put(switch_audio_device),
+        )
         .route("/ws", get(ws_upgrade))
         .with_state(driver)
 }
@@ -73,11 +84,17 @@ async fn create_user(
 async fn create_device(
     State(driver): State<DriverHandle>,
     Path(user_id): Path<String>,
+    body: Option<Json<CreateDeviceRequest>>,
 ) -> Result<(StatusCode, Json<CreateDeviceResponse>), StatusCode> {
     let owner = ecs::id_to_entity(&user_id).ok_or(StatusCode::NOT_FOUND)?;
+    let as_audio_source = body.map(|Json(req)| req.as_audio_source).unwrap_or(false);
 
     let (reply, rx) = oneshot::channel();
-    driver.send(Command::CreateDevice { owner, reply });
+    driver.send(Command::CreateDevice {
+        owner,
+        as_audio_source,
+        reply,
+    });
     let device = rx
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
@@ -108,7 +125,31 @@ async fn get_user(
         user_id,
         username: view.username,
         devices: view.devices.into_iter().map(ecs::entity_to_id).collect(),
+        online: view.online,
     }))
+}
+
+/// Moves the active audio source for `user_id` onto `device_id` — the
+/// project-defining feature made concrete over HTTP. Returns 400 if
+/// `device_id` isn't owned by `user_id`, 404 if either id is unknown.
+async fn switch_audio_device(
+    State(driver): State<DriverHandle>,
+    Path((user_id, device_id)): Path<(String, String)>,
+) -> Result<StatusCode, StatusCode> {
+    let user = ecs::id_to_entity(&user_id).ok_or(StatusCode::NOT_FOUND)?;
+    let to_device = ecs::id_to_entity(&device_id).ok_or(StatusCode::NOT_FOUND)?;
+
+    let (reply, rx) = oneshot::channel();
+    driver.send(Command::SwitchAudioDevice {
+        user,
+        to_device,
+        reply,
+    });
+    rx.await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .map_err(|_| StatusCode::BAD_REQUEST)?;
+
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn ws_upgrade(State(driver): State<DriverHandle>, ws: WebSocketUpgrade) -> impl IntoResponse {

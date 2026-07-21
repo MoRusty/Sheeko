@@ -6,7 +6,7 @@ use super::commands::{Command, UserView};
 use super::components::{
     AudioSink, AudioSource, Identity, JitterState, OutboundTx, OwnedBy, RoomMembership, TextChannel,
 };
-use super::systems::{audio_forward, text_broadcast};
+use super::systems::{audio_forward, device_switch, presence, text_broadcast};
 use crate::common::jitter::SequenceTracker;
 use crate::common::message::ServerMessage;
 use crate::common::packet;
@@ -52,10 +52,17 @@ pub fn handle_command(world: &mut World, cmd: Command) {
             debug!(?entity, "created user");
             let _ = reply.send(entity);
         }
-        Command::CreateDevice { owner, reply } => {
+        Command::CreateDevice {
+            owner,
+            as_audio_source,
+            reply,
+        } => {
             if world.contains(owner) {
                 let entity = world.spawn((OwnedBy(owner),));
-                debug!(?entity, ?owner, "created device");
+                if as_audio_source {
+                    let _ = world.insert_one(entity, AudioSource);
+                }
+                debug!(?entity, ?owner, as_audio_source, "created device");
                 let _ = reply.send(Some(entity));
             } else {
                 let _ = reply.send(None);
@@ -74,27 +81,49 @@ pub fn handle_command(world: &mut World, cmd: Command) {
                     .filter(|(_, owned)| owned.0 == user)
                     .map(|(entity, _)| entity)
                     .collect();
-                UserView { username, devices }
+                let online = presence::is_online(world, user);
+                UserView {
+                    username,
+                    devices,
+                    online,
+                }
             });
 
             let _ = reply.send(view);
         }
         Command::RegisterVoicePeer {
+            owner,
             room,
+            as_source,
             outbound,
             reply,
         } => {
+            if !world.contains(owner) {
+                let _ = reply.send(None);
+                return;
+            }
             let entity = world.spawn((
+                OwnedBy(owner),
                 RoomMembership(room),
-                AudioSource,
                 AudioSink,
                 OutboundTx(outbound),
                 JitterState(SequenceTracker::new()),
             ));
-            debug!(?entity, room = room.0, "registered voice peer");
-            let _ = reply.send(entity);
+            if as_source {
+                let _ = world.insert_one(entity, AudioSource);
+            }
+            debug!(?entity, ?owner, room = room.0, as_source, "registered voice peer");
+            let _ = reply.send(Some(entity));
         }
         Command::PacketReceived { from, packet: bytes } => {
+            // Only the Device currently tagged AudioSource for its user may
+            // push audio into the room — this is what makes SwitchAudioDevice
+            // a real gate rather than a decorative marker.
+            if world.get::<&AudioSource>(from).is_err() {
+                debug!(?from, "dropped packet from non-audio-source device");
+                return;
+            }
+
             let Ok((header, _payload)) = packet::decode(bytes.clone()) else {
                 debug!(?from, "dropped malformed packet");
                 return;
@@ -149,6 +178,17 @@ pub fn handle_command(world: &mut World, cmd: Command) {
                 return;
             };
             text_broadcast::run(world, room, from, &bytes.into());
+        }
+        Command::SwitchAudioDevice {
+            user,
+            to_device,
+            reply,
+        } => {
+            let result = device_switch::run(world, user, to_device);
+            if let Ok(()) = &result {
+                debug!(?user, ?to_device, "switched active audio device");
+            }
+            let _ = reply.send(result);
         }
     }
 }

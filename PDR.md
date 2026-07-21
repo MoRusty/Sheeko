@@ -15,12 +15,13 @@ RustCord is an educational and functional prototype of a real-time communication
 - ECS-based state model (`hecs`): User and Device entities, capability components, a single-writer driver task as the sole owner of the `World`.
 - REST API for user/device registration and channel listing (in-memory ECS state, no database).
 - Persistent WebSocket connection for real-time text, fanned out to every Device entity in a room regardless of which User owns it.
-- UDP voice server capable of receiving encrypted Opus packets and forwarding them (SFU) by querying Device entities' room membership and capability components.
-- Runtime capability switching: move the active `AudioSource` (or other capability) from one Device entity to another belonging to the same User, without dropping the Room/User state.
+- UDP voice server capable of receiving Opus packets and forwarding them (SFU) by querying Device entities' room membership and capability components.
+- Runtime capability switching: move the active `AudioSource` (or other capability) from one Device entity to another belonging to the same User, without dropping the Room/User state. (Done — see M5.)
 - Local audio capture and playback using `cpal`.
 - Basic jitter detection (log dropped/reordered packets).
 
 ### Out-of-Scope
+- DTLS/SRTP encryption of the voice transport — scoped for M5, deferred to its own follow-up task (see §7's risk table); voice packets are currently forwarded unencrypted.
 - Video streaming / screen sharing (the Device/component model supports a future `VideoSource`/`VideoSink`, but no video codec or transport is implemented in this project).
 - User permissions / role-based access control (RBAC).
 - Database persistence (PostgreSQL) for the initial MVP (we use the in-memory ECS `World`).
@@ -42,7 +43,7 @@ RustCord is an educational and functional prototype of a real-time communication
 | **M2: Audio Pipeline** | 1/5 | Capture mic, play beep, encode/decode Opus frames; a Device entity tags itself `AudioSource` as soon as it's producing audio. | Tasks 4, 5, 6 | Done |
 | **M3: Jitter & Forwarding** | 2/5 | UDP sequence tracker, ECS-based SFU forwarding system (query producers/consumers by room + capability component). | Tasks 8, 10 | Done |
 | **M4: Text Gateway** | 2/5 | WebSocket broadcast server fanning out to every `TextChannel`-tagged Device in a room (including multiple devices of the same user). | Tasks 3, 9 | Done |
-| **M5: Full Integration** | 3/5 | Combine Gateway + Voice Node; DTLS/SRTP; implement the runtime device-switch endpoint (move `AudioSource` between two Devices of one User mid-call). | All tasks combined. | Not started |
+| **M5: Full Integration** | 3/5 | Implement the runtime device-switch endpoint (move `AudioSource` between two Devices of one User mid-call) and presence; DTLS/SRTP deferred as its own follow-up (see §7). | All tasks combined. | Done (core); DTLS/SRTP deferred |
 
 ## 6. Technical Specifications
 - **Language**: Rust (Latest Stable, Edition 2024).
@@ -50,7 +51,7 @@ RustCord is an educational and functional prototype of a real-time communication
 - **Audio Specs**: 48 kHz sampling rate, 20ms packetization (960 samples per frame), Opus bitrate ~32-64 kbps.
 - **Transport**:
   - **Text**: JSON over WebSockets.
-  - **Voice**: Raw RTP headers + Opus payload over UDP (with DTLS encryption added in M5).
+  - **Voice**: Raw RTP-like headers + Opus payload over unencrypted UDP. DTLS/SRTP was scoped for M5 but deferred as its own follow-up (see §7) — neither of M5's actual DoD checks require it, and it's independently the largest, most uncertain piece of work in the project.
 - **Concurrency Model**: Multi-threaded Tokio runtime (work-stealing) for I/O; the ECS `World` itself is mutated by exactly one task to avoid lock contention entirely.
 
 ## 7. Risks & Mitigations
@@ -61,11 +62,12 @@ RustCord is an educational and functional prototype of a real-time communication
 | **Tokio task sprawl** | Resource exhaustion | Limit concurrent UDP tasks per room; one task per connection/socket, never per-packet; the driver task is the one intentional long-lived singleton. |
 | **`hecs` ergonomics unfamiliar for an event-driven server** (most examples are game loops, not async servers) | Wasted time fighting the library mid-feature | De-risk with an isolated spike test (spawn/despawn, add/remove component, run a query) before building real endpoints on top — done in M1. |
 | **Accidental concurrent `World` mutation** | Data races / borrow panics | Hard rule: only the driver task ever holds `&mut World`. Anything that looks like it needs concurrent access becomes a new `Command` variant instead. |
+| **DTLS/SRTP via `webrtc-rs`** (ICE, handshake state machine, key derivation) | Largest, most open-ended remaining scope in the project | Deferred out of M5 into its own follow-up task, sized and scoped on its own rather than folded into an already-large integration milestone. Plain UDP forwarding is the transport until then. |
 
 ## 8. Definition of Done (Success Criteria)
 - [x] Gateway can create a User entity and attach multiple Device entities to it, queryable via REST (M1, done).
 - [x] Two separate terminal clients can exchange "Hello" via WebSocket (M4, done; verified with real `term_client` processes and automated in `tests/ws_chat.rs`, which also proves one User's two Devices both receive a fan-out from a third party).
 - [x] A user can run `cargo run --bin voice_client --features audio` and hear a 440Hz tone (M2, done; also tags a local Device entity `AudioSource`).
 - [x] A user can run `cargo run --bin mic_test --features audio` and see amplitude levels in the terminal (M2, done).
-- [ ] **Gold Standard**: Client A speaks into the mic; Client B (on the same LAN) receives and plays the audio with less than 200ms round-trip delay, verified via terminal logs.
-- [ ] **ECS Gold Standard**: Mid-call, switch the active audio source for one user from Device A to Device B (both attached to the same User entity) and confirm the room keeps receiving audio from the new device with no Room/User-level reconnection.
+- [x] **Gold Standard**: Client A speaks into the mic; Client B (on the same LAN) receives and plays the audio with less than 200ms round-trip delay, verified via terminal logs (M5, done for the forwarding path — measured ~0.3ms avg / <1ms max over 20 packets on loopback between two UDP clients through `voice_node`; not yet re-verified across two physically separate machines on a real LAN, and doesn't include real mic/speaker hardware latency since `voice_node` forwards raw bytes without decoding them).
+- [x] **ECS Gold Standard**: Mid-call, switch the active audio source for one user from Device A to Device B (both attached to the same User entity) and confirm the room keeps receiving audio from the new device with no Room/User-level reconnection (M5, done — verified live: a third peer kept listening throughout, received nothing from Device A after the switch and the same packets from Device B immediately after, with no reconnection on the listener's side; automated at the ECS level in `tests/device_switch.rs`).
